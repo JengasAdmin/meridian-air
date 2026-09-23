@@ -4,6 +4,8 @@
 **VATSIM** и **IVAO**: публичный сайт, система пилотов, бронирование рейсов, PIREP,
 флот, маршруты, хабы, лётная академия, Discord-бот, админ-панель с RBAC, RU/EN.
 
+**Live:** https://meridian-air-va.vercel.app
+
 ![stack](https://img.shields.io/badge/Next.js-14-black) ![ts](https://img.shields.io/badge/TypeScript-strict-blue) ![db](https://img.shields.io/badge/Prisma-SQLite%20%2F%20PostgreSQL-blueviolet)
 
 ---

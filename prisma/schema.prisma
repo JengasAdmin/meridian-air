@@ -1,14 +1,14 @@
 // Meridian AIR — Prisma schema
-// Dev: SQLite (zero-config local run). Production: PostgreSQL (Supabase).
-// To switch: change provider to "postgresql" and set DATABASE_URL to the Supabase
-// connection string — the schema itself is written to stay portable.
+// Production: PostgreSQL (Supabase, dedicated schema "meridian_air" via DATABASE_URL
+// parameter, so it coexists with other projects in the same database).
+// Dev alternative: provider "sqlite" + DATABASE_URL="file:./dev.db" — the schema is portable.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
