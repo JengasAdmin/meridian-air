@@ -1,0 +1,381 @@
+// Meridian AIR — Prisma schema
+// Dev: SQLite (zero-config local run). Production: PostgreSQL (Supabase).
+// To switch: change provider to "postgresql" and set DATABASE_URL to the Supabase
+// connection string — the schema itself is written to stay portable.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  passwordHash String?
+  name         String
+  avatarUrl    String?
+  discordId    String?
+  vatsimCid    String?
+  ivaoVid      String?
+  locale       String        @default("ru")
+  status       String        @default("ACTIVE") // ACTIVE | SUSPENDED
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  pilotProfile   PilotProfile?
+  roles          UserRole[]
+  bookings       Booking[]
+  pireps         Pirep[]
+  news           News[]
+  auditLogs      AuditLog[]
+  notifications  Notification[]
+  trainingRecs   TrainingRecord[]
+  flightsOperated Flight[]
+}
+
+model Role {
+  id          String  @id @default(cuid())
+  key         String  @unique // e.g. GEN_PRESIDENT, FLT_CAPTAIN, HUB_DIRECTOR
+  nameRu      String
+  nameEn      String
+  department  String  @default("GEN") // GEN | MRD | FLT | PR | ADM | TECH | ENG | VAT
+  rank        Int     @default(100) // lower = higher in hierarchy (informational)
+  isPilotRank Boolean @default(false)
+  inheritsId  String?
+  inherits    Role?   @relation("RoleInheritance", fields: [inheritsId], references: [id])
+  inheritedBy Role[]  @relation("RoleInheritance")
+  permissions RolePermission[]
+  users       UserRole[]
+  rankHolders PilotProfile[]
+}
+
+model Permission {
+  id      String           @id @default(cuid())
+  key     String           @unique // DOMAIN.ACTION, e.g. BOOKINGS.CREATE
+  roles   RolePermission[]
+}
+
+model RolePermission {
+  roleId        String
+  roleIdRef     Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permissionId  String
+  permission    Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model UserRole {
+  id        String   @id @default(cuid())
+  userId    String
+  roleId    String
+  hubId     String? // optional scope: permission applies within this hub
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  hub       Airport? @relation(fields: [hubId], references: [id])
+
+  @@unique([userId, roleId, hubId])
+  @@index([userId])
+}
+
+model Airport {
+  id       String  @id @default(cuid())
+  code     String  @unique // ICAO
+  iata     String?
+  name     String
+  city     String
+  cityRu   String?
+  country  String
+  countryRu String?
+  lat      Float
+  lon      Float
+  isHub    Boolean @default(false)
+  tz       String?
+
+  hubStaff      UserRole[]
+  pilotProfiles PilotProfile[]
+  routesFrom    Route[]        @relation("RouteOrigin")
+  routesTo    Route[]    @relation("RouteDest")
+  aircraft    Aircraft[]
+  bookingsDep Booking[]  @relation("BookingOrigin")
+  pirepsDep   Pirep[]    @relation("PirepOrigin")
+}
+
+model PilotProfile {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  pilotId     String   @unique // MRD-0001
+  rankId      String?
+  rank        Role?    @relation(fields: [rankId], references: [id])
+  hubId       String?
+  hub         Airport? @relation(fields: [hubId], references: [id])
+  status      String   @default("PENDING") // PENDING | VERIFIED | ACTIVE | INACTIVE | SUSPENDED
+  hours       Float    @default(0)
+  flightsCount Int     @default(0)
+  distanceNm  Float    @default(0)
+  joinDate    DateTime @default(now())
+  achievements String  @default("[]") // JSON array
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AircraftCategory {
+  id     String  @id @default(cuid())
+  key    String  @unique // PASSENGER | CARGO | MILITARY | GENERAL | SOVIET
+  nameRu String
+  nameEn String
+  aircraft Aircraft[]
+  routes Route[]
+}
+
+model Aircraft {
+  id           String  @id @default(cuid())
+  registration String  @unique
+  type         String // A320, B737...
+  name         String
+  manufacturer String // Airbus | Boeing | ...
+  categoryId   String
+  category     AircraftCategory @relation(fields: [categoryId], references: [id])
+  variant      String?
+  role         String?
+  hubId        String?
+  hub          Airport? @relation(fields: [hubId], references: [id])
+  status       String  @default("ACTIVE") // ACTIVE | IN_SERVICE | MAINTENANCE | RESERVED | RETIRED | UNAVAILABLE
+  capacityPax  Int?
+  capacityCargoKg Int?
+  isMilitary   Boolean @default(false)
+  active       Boolean @default(true)
+  notes        String?
+
+  bookings Booking[]
+  pireps   Pirep[]
+  flights  Flight[]
+}
+
+model Route {
+  id            String  @id @default(cuid())
+  flightNumber  String  @unique
+  originId      String
+  origin        Airport @relation("RouteOrigin", fields: [originId], references: [id])
+  destId        String
+  dest          Airport @relation("RouteDest", fields: [destId], references: [id])
+  categoryId    String
+  category      AircraftCategory @relation(fields: [categoryId], references: [id])
+  aircraftType  String? // preferred type code
+  distanceNm    Float
+  durationMin   Int
+  frequency     String  @default("DAILY")
+  active        Boolean @default(true)
+
+  bookings Booking[]
+  events   Event[]
+
+  @@index([originId])
+  @@index([destId])
+}
+
+model Booking {
+  id            String   @id @default(cuid())
+  code          String   @unique // MRD-BOOK-000001
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  routeId       String
+  route         Route    @relation(fields: [routeId], references: [id])
+  aircraftId    String
+  aircraft      Aircraft @relation(fields: [aircraftId], references: [id])
+  originId      String
+  origin        Airport  @relation("BookingOrigin", fields: [originId], references: [id])
+  network       String // VATSIM | IVAO | OFFLINE
+  operationType String // PASSENGER | CARGO | MILITARY | GENERAL | SOVIET
+  flightNumber  String
+  scheduledAt   DateTime
+  remarks       String?
+  status        String   @default("BOOKED") // BOOKED | COMPLETED | CANCELLED | NO_SHOW
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  pirep   Pirep?
+  flight  Flight?
+}
+
+model Flight {
+  id           String   @id @default(cuid())
+  bookingId    String   @unique
+  booking      Booking  @relation(fields: [bookingId], references: [id])
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  aircraftId   String
+  aircraft     Aircraft @relation(fields: [aircraftId], references: [id])
+  callsign     String
+  network      String
+  status       String   @default("SCHEDULED") // SCHEDULED | BOARDING | DEPARTED | ENROUTE | ARRIVED | COMPLETED
+  lat          Float?
+  lon          Float?
+  altitudeFt   Int?
+  speedKt      Int?
+  headingDeg   Int?
+  startedAt    DateTime?
+  completedAt  DateTime?
+  flightTimeMin Int?
+  lastUpdate   DateTime @default(now())
+}
+
+model Pirep {
+  id            String   @id @default(cuid())
+  code          String   @unique // MRD-PIREP-000001
+  bookingId     String?  @unique
+  booking       Booking? @relation(fields: [bookingId], references: [id])
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  aircraftId    String
+  aircraft      Aircraft @relation(fields: [aircraftId], references: [id])
+  originId      String
+  origin        Airport  @relation("PirepOrigin", fields: [originId], references: [id])
+  destCode      String // ICAO of arrival (may be non-hub)
+  flightNumber  String
+  callsign      String
+  network       String
+  depTime       DateTime
+  arrTime       DateTime
+  durationMin   Int
+  distanceNm    Float
+  fuelKg        Float?
+  remarks       String?
+  status        String   @default("PENDING") // PENDING | APPROVED | REJECTED | CANCELLED
+  reviewType    String   @default("OPERATIONS") // AUTO | INSTRUCTOR | OPERATIONS
+  reviewedById  String?
+  reviewNote    String?
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
+  @@index([status])
+}
+
+model Qualification {
+  id       String @id @default(cuid())
+  key      String @unique // e.g. TYPE_RATING_A320, IFR, MILITARY_JET
+  nameRu   String
+  nameEn   String
+  category String // TYPE_RATING | RATING | ACADEMIC
+}
+
+model PilotQualification {
+  userId          String
+  qualificationId String
+  grantedAt       DateTime @default(now())
+  grantedBy       String?
+
+  @@id([userId, qualificationId])
+}
+
+model TrainingCourse {
+  id            String  @id @default(cuid())
+  key           String  @unique
+  titleRu       String
+  titleEn       String
+  descriptionRu String
+  descriptionEn String
+  category      String // PASSENGER | CARGO | MILITARY | GENERAL | SOVIET
+  durationH     Int
+  active        Boolean @default(true)
+  records       TrainingRecord[]
+}
+
+model TrainingRecord {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  courseId    String
+  course      TrainingCourse @relation(fields: [courseId], references: [id])
+  status      String   @default("ENROLLED") // ENROLLED | IN_PROGRESS | PASSED | FAILED
+  instructorId String?
+  grade       Int?
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+}
+
+model News {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  titleRu     String
+  titleEn     String
+  shortRu     String
+  shortEn     String
+  contentRu   String
+  contentEn   String
+  image       String?
+  category    String   @default("GENERAL")
+  authorId    String
+  author      User     @relation(fields: [authorId], references: [id])
+  status      String   @default("PUBLISHED") // DRAFT | PUBLISHED | ARCHIVED
+  publishedAt DateTime @default(now())
+}
+
+model Event {
+  id          String   @id @default(cuid())
+  titleRu     String
+  titleEn     String
+  descriptionRu String
+  descriptionEn String
+  date        DateTime
+  routeId     String?
+  route       Route?   @relation(fields: [routeId], references: [id])
+  aircraftType String?
+  network     String
+  status      String   @default("OPEN") // OPEN | CLOSED | COMPLETED
+}
+
+model EventParticipant {
+  eventId String
+  userId  String
+  joinedAt DateTime @default(now())
+
+  @@id([eventId, userId])
+}
+
+model DiscordChannel {
+  id        String @id @default(cuid())
+  key       String @unique // flight-bookings, flight-reports, live-flights, ...
+  channelId String
+  guildId   String?
+}
+
+model SystemSetting {
+  key   String @id
+  value String
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  actorRole String?
+  action    String // PILOT_VERIFIED, BOOKING_CANCELLED, ...
+  target    String?
+  oldValue  String?
+  newValue  String?
+  meta      String?
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([action])
+  @@index([createdAt])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  type      String // BOOKING_CREATED, PIREP_APPROVED, ...
+  payload   String   @default("{}") // JSON
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, read])
+}
